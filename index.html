@@ -416,7 +416,11 @@ length(missing.data)</code></pre>
 <pre class="r"><code>missing.data &lt;- which(colSums(is.na(train) | train == &quot;&quot;)&gt;0.8*nrow(train))
 length(missing.data)</code></pre>
 <pre><code>## [1] 100</code></pre>
+<<<<<<< HEAD
 <p>there are missing data in 100 variable out of the 160. we can use zero and near-zero variance function to eliminate variables with zero variance (i.e. containing zero entropy or information).</p>
+=======
+<p>there are missing data in 100 variable out of the 160. we can use zero and near-zero variance function to eliminate variables with zero variance (i.e. containing zero entropy or information).</p>
+>>>>>>> a88c200e91251baf0bceb83b04807e2d2d8570c7
 <pre class="r"><code>data.nzv &lt;- nearZeroVar(train, saveMetrics = TRUE) # save matrix to see 
 data.nzv &lt;- which(data.nzv$zeroVar == &quot;TRUE&quot; | data.nzv$nzv == &quot;TRUE&quot;)
 length(data.nzv)</code></pre>

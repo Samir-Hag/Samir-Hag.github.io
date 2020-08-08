@@ -1,0 +1,281 @@
+---
+title: "Project Assignment"
+author: "Samir N. Hag Ibrahim"
+date: "8/7/2020"
+output: html_document
+---
+
+# Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, The goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways include -
+
+    A: exactly according to the specification
+    B: throwing the elbows to the front
+    C: lifting the dumbbell only halfway
+    D: lowering the dumbbell only halfway
+    E: throwing the hips to the front
+
+# Loading Required Packages
+```{r}
+suppressMessages(library(caret))
+suppressMessages(library(gbm))
+suppressMessages(library(randomForest))
+
+```
+
+
+# Loading Data
+```{r}
+train <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+test <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+
+# Data Processing and Partitioning
+Now, checking missing values
+```{r}
+missing.data <- c() # creat empty container to capture results from the function
+for (i in names(train)) {
+        missing <- sum((is.na(train[, i]))| train[, i] == "")
+        if (missing > 0.80*nrow(train)) { # if missing data is more than 80% of the no. of rows
+                missing.data[i] <- which(colnames(train) == i) # then store the variable "i" and store the number of missings
+        }
+}
+length(missing.data)
+```
+
+or, simply
+```{r}
+missing.data <- which(colSums(is.na(train) | train == "")>0.8*nrow(train))
+length(missing.data)
+```
+
+there are missing data in 100 variable out of the 160. we can use zero and near-zero variance function to eliminate variables with zero variance (i.e. containing zero entropy or information). 
+```{r}
+data.nzv <- nearZeroVar(train, saveMetrics = TRUE) # save matrix to see 
+data.nzv <- which(data.nzv$zeroVar == "TRUE" | data.nzv$nzv == "TRUE")
+length(data.nzv)
+```
+
+see whether all 60 low variance variables are within the 100 missing data
+```{r}
+length(intersect(missing.data, data.nzv))
+```
+ 
+ Almost all except 1, to know which one
+```{r}
+cname <- setdiff(data.nzv, missing.data) # in data.nzv but not in missing.data
+colnames(train[cname])
+var(train[,cname])
+```
+
+Then need to remove columns from 1:7 (id columns), and all the missing data columns.
+```{r}
+train <- train[ , -missing.data]
+train <- train[,-c(1:7)]       
+dim(train)
+```
+now in total 107 column was removed.
+
+we will remove the same variables from the test data.
+
+```{r}
+test <- test[ , -missing.data]
+test <- test[,-c(1:7)]   
+test <-  test[,-53]
+dim(test)
+```
+## Data transformation 
+
+```{r}
+# transforming trainin data set
+train.trans <-preProcess(train, method = c("scale", "center"))
+train <- predict(train.trans, newdata = train)
+
+# transforming test data set
+test.trans <-preProcess(test, method = c("scale", "center"))
+test <- predict(test.trans, newdata = test)
+```
+
+The training set will be splitted into two set: train and validate, while leaving the test set the final model evaluation.Before partitioning the train data set we need to evaluate class imbalance in the data set.
+
+
+```{r}
+table(train$classe)
+```
+we see class "A" is little more weigthed, butwe don't need to handle such little difference.
+So, we will partition the train dataset.
+```{r}
+# partitioning the data into 70% training and 30% validation
+inTrain <- createDataPartition(train$classe, p=0.7, list = FALSE) 
+validate <- train[-inTrain, ]
+train <- train[inTrain, ]
+dim(train);dim(validate)
+```
+
+# Data Exploration and Preparation
+Find relationship between variables
+
+```{r}
+corMatrix <- cor(train[,-53])
+cor.var <- findCorrelation(corMatrix, cutoff = 0.8, name = TRUE) #0.8 correlation threashold
+cor.var
+```
+there are 10 variables with a correlation 0.8 and more, therefore causion for multicollinearity must be taken.
+
+```{r}
+featurePlot(x =train[,1:24],
+            y = train$classe,
+            plot = "box",
+            strip=strip.custom(par.strip.text=list(cex=.7)),
+            scales = list(x = list(relation="free"), 
+                          y = list(relation="free")))
+
+featurePlot(x =train[,25:52],
+            y = train$classe,
+            plot = "box",
+            strip=strip.custom(par.strip.text=list(cex=.7)),
+            scales = list(x = list(relation="free"), 
+                          y = list(relation="free")))
+
+```
+
+
+## Parameters Tunning
+First we start with Parameters Tunning
+
+```{r}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+```
+
+## 1- Linear Discriminate Analysis (LDA)
+
+```{r}
+set.seed(1)
+lda.fit = train(classe ~ ., data=train, method="lda",
+                trControl = fitControl) 
+```
+
+```{r}
+lda.pred <- predict(lda.fit, validate)
+confusionMatrix(lda.pred, validate$classe)[3]
+lda.correct <- round(mean(lda.pred == validate$classe)*100,2) 
+lda.correct
+```
+
+## 2- Quadratic Discriminant Analysis - QDA
+
+```{r}
+qda.fit = train(classe ~ ., data=train, method="qda",
+                trControl = fitControl)
+
+```
+
+```{r}
+qda.pred <- predict(qda.fit, validate)
+confusionMatrix(qda.pred, validate$classe)[3]
+qda.correct <- round(mean(qda.pred == validate$classe)*100,2) 
+qda.correct
+```
+
+## 3- K_NEAREST NEIGHBORS "KNN" 
+
+```{r}
+set.seed(3)
+knn.fit = train(classe ~ ., data=train, method="knn",
+                trControl = fitControl)
+```
+
+```{r}
+knn.pred <- predict(knn.fit,  validate) 
+confusionMatrix(knn.pred, validate$classe) 
+knn.correct <- round(mean(knn.pred == validate$classe)*100,2) 
+knn.correct
+```
+
+## 4- Decision Tree
+
+```{r}
+set.seed(4)
+dt.fit <- train(classe~., data = train, 
+                method = "rpart",
+                trControl = fitControl
+                )
+#fancyRpartPlot(dt.fit)
+```
+
+```{r}
+dt.pred <- predict(dt.fit, validate)
+confusionMatrix(dt.pred, validate$classe)
+dt.correct <- round(mean(dt.pred == validate$classe)*100,2) # 70% correct predictions
+dt.correct
+```
+
+
+## 5- Random Forest
+
+```{r}
+rf.fit <- train(classe~., data = train,
+                   method = "rf",
+                   trControl = fitControl)
+
+```
+
+```{r}
+rf.pred <- predict(rf.fit, validate)
+confusionMatrix(rf.pred, validate$classe)
+rf.correct <- round(mean(rf.pred == validate$classe)*100, 2)
+rf.correct
+```
+
+
+## 6- Bagging
+Bagging is simply a special case of random forest with m = p, accordingly,randomeForest() function was used for bagging calculation.
+
+```{r}
+set.seed(6)
+bag.fit <- train(classe~., data = train,
+                   method = "treebag",
+                   trControl = fitControl)
+
+```
+
+```{r}
+bag.pred <- predict(bag.fit, validate)
+confusionMatrix(bag.pred, validate$classe)
+bag.correct <- round(mean(bag.pred == validate$classe)*100, 2)
+bag.correct
+```
+
+
+## 7- Generalized Boosting Model (GBM)
+
+```{r}
+boost.fit <- train(classe~., data = train,
+                   method = "xgbTree",
+                   trControl = fitControl)
+
+boost.pred <- predict(boost.fit, validate)
+confusionMatrix(boost.pred, validate$classe)
+boost.correct <- round(mean(boost.pred == validate$classe)*100,2) # 96% correct predictions
+boost.correct
+```
+
+
+# Comparing models
+
+```{r}
+model.compare <- resamples(list(LDA =lda.fit, QDA =qda.fit, KNN = knn.fit, DT = dt.fit,RF =rf.fit, BAGGING = bag.fit ,BOOSTING = boost.fit))
+summary(model.compare)
+```
+```{r}
+models.plot <- list(x=list(relation="free"), y=list(relation="free"))
+bwplot(model.compare, scale = models.plot)
+```
+
+# testing the model
+
+```{r}
+modelfit <- predict(boost.fit, newdata = test)
+modelfit
+```
+
